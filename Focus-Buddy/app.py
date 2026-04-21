@@ -1,182 +1,263 @@
-import time
+from datetime import datetime
+from pathlib import Path
 
+import pandas as pd
 import streamlit as st
 
-
-# 25 分钟番茄钟的默认总时长（单位：秒）
-DEFAULT_DURATION = 25 * 60
+from logger import get_recent_logs
 
 
-def init_session_state() -> None:
-    """初始化页面运行所需的状态，避免每次重跑时重置倒计时。"""
-    if "remaining_seconds" not in st.session_state:
-        st.session_state.remaining_seconds = DEFAULT_DURATION
+BASE_DIR = Path(__file__).resolve().parent
+HEARTBEAT_FILE = BASE_DIR / "sensor_monitor_heartbeat.txt"
+HEARTBEAT_HEALTHY_SECONDS = 30
+HEARTBEAT_DEGRADED_SECONDS = 180
 
-    if "is_running" not in st.session_state:
-        # 首次进入页面时自动开始倒计时
-        st.session_state.is_running = True
-
-    if "show_emotions" not in st.session_state:
-        st.session_state.show_emotions = False
-
-    if "selected_emotion" not in st.session_state:
-        st.session_state.selected_emotion = ""
-
-    if "coach_message" not in st.session_state:
-        st.session_state.coach_message = ""
+ALERT_LABELS = {
+    "[CRITICAL_HOT]": "critical high temperature alert",
+    "[HOT]": "high temperature warning",
+    "[HOT_WARNING]": "high temperature warning",
+    "[COLD]": "low temperature warning",
+    "[COLD_WARNING]": "low temperature warning",
+    "[HUMID]": "high humidity warning",
+    "[HUMID_WARNING]": "high humidity warning",
+    "[NORMAL]": "normal status",
+}
 
 
-def format_time(total_seconds: int) -> str:
-    """把秒数转换成 MM:SS 的显示格式。"""
-    minutes = total_seconds // 60
-    seconds = total_seconds % 60
-    return f"{minutes:02d}:{seconds:02d}"
+def parse_float(value):
+    """Safely parse a numeric value for dashboard display."""
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
 
 
-def render_timer(timer_placeholder: st.delta_generator.DeltaGenerator) -> None:
-    """使用 st.empty() 动态渲染大号倒计时器。"""
-    time_text = format_time(st.session_state.remaining_seconds)
-    timer_placeholder.markdown(
-        f"""
-        <div style="
-            text-align: center;
-            font-size: 5rem;
-            font-weight: 700;
-            color: #1f2937;
-            background: linear-gradient(135deg, #fff7ed, #ffedd5);
-            border: 2px solid #fdba74;
-            border-radius: 20px;
-            padding: 24px 12px;
-            margin: 10px 0 24px 0;
-            box-shadow: 0 10px 30px rgba(249, 115, 22, 0.12);
-        ">
-            {time_text}
-        </div>
-        """,
-        unsafe_allow_html=True,
+def read_heartbeat() -> dict | None:
+    """
+    Read the latest backend heartbeat written by sensor_monitor.py.
+
+    The expected format is:
+        Timestamp,Temperature,Humidity
+    """
+    try:
+        if not HEARTBEAT_FILE.exists():
+            return None
+
+        raw_text = HEARTBEAT_FILE.read_text(encoding="utf-8").strip()
+        timestamp_text, temp_text, humi_text = raw_text.split(",", maxsplit=2)
+
+        return {
+            "Timestamp": timestamp_text,
+            "Room_Temp": parse_float(temp_text),
+            "Room_Humi": parse_float(humi_text),
+            "Age_Seconds": datetime.now().timestamp() - HEARTBEAT_FILE.stat().st_mtime,
+        }
+    except (OSError, ValueError):
+        return None
+
+
+def get_backend_status() -> tuple[str, str, str]:
+    """
+    Return a dashboard-friendly status label, color, and detail text.
+
+    This checks whether sensor_monitor.py is actively writing heartbeat updates.
+    """
+    heartbeat = read_heartbeat()
+
+    if heartbeat is None:
+        return (
+            "OFFLINE",
+            "#b91c1c",
+            "No backend heartbeat found. Start sensor_monitor.py to poll hardware.",
+        )
+
+    age_seconds = heartbeat["Age_Seconds"]
+    if age_seconds <= HEARTBEAT_HEALTHY_SECONDS:
+        return (
+            "ONLINE",
+            "#047857",
+            "sensor_monitor.py is actively polling hardware.",
+        )
+
+    if age_seconds <= HEARTBEAT_DEGRADED_SECONDS:
+        return (
+            "DEGRADED",
+            "#b45309",
+            f"Last heartbeat was {int(age_seconds)} seconds ago.",
+        )
+
+    return (
+        "OFFLINE",
+        "#b91c1c",
+        f"Backend heartbeat is stale. Last update was {int(age_seconds)} seconds ago.",
     )
 
 
-def pause_for_distraction() -> None:
-    """点击分心按钮后暂停倒计时，并展示情绪选项。"""
-    st.session_state.is_running = False
-    st.session_state.show_emotions = True
-    st.session_state.selected_emotion = ""
-    st.session_state.coach_message = ""
+def get_latest_environment(logs: list[dict]) -> dict:
+    """
+    Choose the freshest environment values for the top metrics.
+
+    Heartbeat data is preferred because it represents live polling. If the
+    heartbeat is unavailable, the dashboard falls back to the latest CSV row.
+    """
+    heartbeat = read_heartbeat()
+    if heartbeat and heartbeat.get("Room_Temp") is not None and heartbeat.get("Room_Humi") is not None:
+        return heartbeat
+
+    if logs:
+        latest = logs[0]
+        return {
+            "Timestamp": latest.get("Timestamp", ""),
+            "Room_Temp": parse_float(latest.get("Room_Temp")),
+            "Room_Humi": parse_float(latest.get("Room_Humi")),
+        }
+
+    return {"Timestamp": "", "Room_Temp": None, "Room_Humi": None}
 
 
-def choose_emotion(emotion: str) -> None:
-    """记录用户当前情绪，并显示 AI 教练提示信息。"""
-    st.session_state.selected_emotion = emotion
-    st.session_state.coach_message = f"正在呼叫 AI 教练处理 {emotion}..."
+def format_metric(value, unit: str) -> str:
+    """Format a metric value with a unit, or show a placeholder."""
+    if value is None:
+        return "--"
+    return f"{value:.1f}{unit}"
 
 
-def resume_timer() -> None:
-    """关闭情绪面板并继续倒计时。"""
-    st.session_state.is_running = True
-    st.session_state.show_emotions = False
+def build_temperature_chart(logs: list[dict]) -> pd.DataFrame:
+    """Build a chronological DataFrame for the temperature line chart."""
+    chart_rows = []
+
+    for row in reversed(logs):
+        temp = parse_float(row.get("Room_Temp"))
+        if temp is None:
+            continue
+
+        chart_rows.append(
+            {
+                "Timestamp": row.get("Timestamp", ""),
+                "Room_Temp": temp,
+            }
+        )
+
+    return pd.DataFrame(chart_rows)
 
 
-def reset_timer() -> None:
-    """将番茄钟恢复到 25 分钟初始状态。"""
-    st.session_state.remaining_seconds = DEFAULT_DURATION
-    st.session_state.is_running = True
-    st.session_state.show_emotions = False
-    st.session_state.selected_emotion = ""
-    st.session_state.coach_message = ""
+def format_alert_message(row: dict) -> str:
+    """Format one alert row into an English sentence for the dashboard."""
+    timestamp = row.get("Timestamp", "Unknown time")
+    alert_type = row.get("Alert_Type", "")
+    readable_alert = ALERT_LABELS.get(alert_type, alert_type or "unknown alert")
+    return f"{timestamp} triggered a {readable_alert}."
 
 
-st.set_page_config(page_title="专注番茄钟", page_icon="🍅", layout="centered")
-init_session_state()
+st.set_page_config(
+    page_title="Elderly Home Care Dashboard",
+    page_icon="🏠",
+    layout="wide",
+)
 
-# 直接在当前文件中写入样式，满足“不使用外部 CSS 文件”的要求
 st.markdown(
     """
     <style>
-    .stButton button[kind="primary"] {
-        background-color: #dc2626;
-        color: white;
-        border: none;
+    :root {
+        --warm-bg: #f7f1e8;
+        --ink: #27302f;
+        --sage: #6f8f72;
+        --clay: #b66b45;
+        --paper: rgba(255, 252, 247, 0.92);
+    }
+    .stApp {
+        background:
+            radial-gradient(circle at 10% 5%, rgba(182, 107, 69, 0.18), transparent 32rem),
+            radial-gradient(circle at 90% 15%, rgba(111, 143, 114, 0.18), transparent 28rem),
+            var(--warm-bg);
+        color: var(--ink);
+    }
+    .status-card {
+        background: var(--paper);
+        border: 1px solid rgba(39, 48, 47, 0.12);
+        border-radius: 18px;
+        padding: 18px 20px;
+        box-shadow: 0 18px 45px rgba(39, 48, 47, 0.08);
+    }
+    .status-dot {
+        display: inline-block;
+        width: 12px;
+        height: 12px;
+        border-radius: 999px;
+        margin-right: 8px;
+        vertical-align: middle;
+    }
+    .section-title {
+        font-size: 1.15rem;
         font-weight: 700;
-        border-radius: 12px;
-        height: 3.2rem;
-        width: 100%;
-    }
-    .stButton button[kind="primary"]:hover {
-        background-color: #b91c1c;
-        color: white;
-    }
-    .emotion-title {
-        font-size: 1.1rem;
-        font-weight: 600;
-        margin-top: 1rem;
-        margin-bottom: 0.5rem;
+        margin: 1rem 0 0.6rem 0;
     }
     </style>
     """,
     unsafe_allow_html=True,
 )
 
-st.title("专注番茄钟")
-st.caption("用 25 分钟专注一件事；分心时先停下来，再让 AI 教练帮你识别状态。")
+logs = get_recent_logs(200)
+latest_environment = get_latest_environment(logs)
+status_label, status_color, status_detail = get_backend_status()
 
-# 使用 st.empty() 作为计时器占位容器，后续每次重跑都会在这里更新倒计时
-timer_placeholder = st.empty()
-render_timer(timer_placeholder)
+st.title("Elderly Home Environment Dashboard")
+st.caption("Live indoor sensing, alert history, and backend polling status for family monitoring.")
 
-# 页面状态提示
-if st.session_state.remaining_seconds == 0:
-    st.success("当前番茄钟已完成，休息一下再开始下一轮吧。")
-elif st.session_state.is_running:
-    st.info("计时进行中，请保持专注。")
+status_html = f"""
+<div class="status-card">
+    <span class="status-dot" style="background: {status_color};"></span>
+    <strong>System Status: {status_label}</strong>
+    <div style="margin-top: 6px; color: #4b5563;">{status_detail}</div>
+</div>
+"""
+st.markdown(status_html, unsafe_allow_html=True)
+
+metric_col1, metric_col2 = st.columns(2)
+metric_col1.metric(
+    label="Live Indoor Temperature",
+    value=format_metric(latest_environment["Room_Temp"], "℃"),
+)
+metric_col2.metric(
+    label="Live Indoor Humidity",
+    value=format_metric(latest_environment["Room_Humi"], "%"),
+)
+
+if latest_environment.get("Timestamp"):
+    st.caption(f"Latest reading time: {latest_environment['Timestamp']}")
+
+st.markdown('<div class="section-title">Temperature Trend</div>', unsafe_allow_html=True)
+temperature_chart = build_temperature_chart(logs)
+
+if temperature_chart.empty:
+    st.info("No temperature records are available yet.")
 else:
-    st.warning("计时已暂停。")
+    st.line_chart(
+        temperature_chart,
+        x="Timestamp",
+        y="Room_Temp",
+        height=320,
+    )
 
-# 醒目的红色按钮：用户分心时触发暂停
-if st.button("🆘 我分心了", type="primary", use_container_width=True):
-    pause_for_distraction()
-    st.rerun()
+with st.sidebar:
+    st.header("Recent Alerts")
 
-# 分心后展示情绪按钮
-if st.session_state.show_emotions:
-    st.markdown('<div class="emotion-title">你现在更接近哪种状态？</div>', unsafe_allow_html=True)
+    alert_logs = [
+        row
+        for row in logs
+        if row.get("Alert_Type") and row.get("Alert_Type") != "[NORMAL]"
+    ][:10]
 
-    col1, col2, col3, col4 = st.columns(4)
+    if not alert_logs:
+        st.success("No recent alerts.")
+    else:
+        for alert in alert_logs:
+            st.warning(format_alert_message(alert))
 
-    if col1.button("😰 焦虑", use_container_width=True):
-        choose_emotion("😰 焦虑")
-    if col2.button("🥱 枯燥", use_container_width=True):
-        choose_emotion("🥱 枯燥")
-    if col3.button("🤯 困难", use_container_width=True):
-        choose_emotion("🤯 困难")
-    if col4.button("📱 手机诱惑", use_container_width=True):
-        choose_emotion("📱 手机诱惑")
+st.markdown('<div class="section-title">Recent Environment Records</div>', unsafe_allow_html=True)
+recent_logs = get_recent_logs(10)
 
-    if st.session_state.coach_message:
-        st.write(st.session_state.coach_message)
-
-# 额外提供继续与重置，方便用户在暂停后恢复节奏
-control_col1, control_col2 = st.columns(2)
-if control_col1.button("继续专注", use_container_width=True):
-    resume_timer()
-    st.rerun()
-
-if control_col2.button("重新开始 25 分钟", use_container_width=True):
-    reset_timer()
-    st.rerun()
-
-# 倒计时核心逻辑：
-# 1. 剩余时间存入 st.session_state，避免页面重跑时被重置
-# 2. 使用 time.sleep(1) 控制每秒更新一次
-# 3. 使用 st.empty() 对应的占位容器刷新倒计时显示
-if st.session_state.is_running and st.session_state.remaining_seconds > 0:
-    time.sleep(1)
-    st.session_state.remaining_seconds -= 1
-    render_timer(timer_placeholder)
-
-    if st.session_state.remaining_seconds == 0:
-        st.session_state.is_running = False
-        st.session_state.show_emotions = False
-        st.rerun()
-
-    st.rerun()
+if not recent_logs:
+    st.info("No environment logs are available yet.")
+else:
+    st.dataframe(recent_logs, use_container_width=True, hide_index=True)

@@ -4,85 +4,76 @@ import requests
 from dotenv import load_dotenv
 
 
-# 在程序启动时加载本地 .env 文件中的环境变量
+# Load local environment variables from .env.
 load_dotenv()
 
-# OpenAI 兼容接口配置
+# OpenAI-compatible API configuration.
 API_KEY = os.getenv("LLM_API_KEY")
-API_URL = "https://api.deepseek.com/v1/chat/completions"
-MODEL_NAME = "deepseek-chat"
+API_URL = os.getenv("LLM_API_URL", "https://api.deepseek.com/v1/chat/completions")
+MODEL_NAME = os.getenv("LLM_MODEL", "deepseek-chat")
 
-# 本地降级方案：当 API 失败时，直接返回预设的微任务建议
-LOCAL_FALLBACK_TASKS = {
-    "焦虑": "慢慢深呼吸3次，再喝一口水。",
-    "枯燥": "立刻站起来伸个懒腰10秒。",
-    "困难": "先写下当前最小下一步动作。",
-    "手机诱惑": "把手机扣下，放到手够不到处。",
-}
-
-# 未命中具体情绪时的通用备用返回
-FALLBACK_TEXT = "深呼吸3次，然后闭眼休息2分钟。"
+# The model must only return one of these labels.
+VALID_LABELS = {"[HOT]", "[COLD]", "[HUMID]", "[NORMAL]", "[CRITICAL_HOT]"}
 
 
-def build_system_prompt(emotion: str, mode: str) -> str:
+def get_local_environment_label(temp: float, humi: float) -> str:
     """
-    根据干预模式，生成对应的 System Prompt。
+    Return a deterministic local fallback label when the LLM request fails.
 
-    参数：
-        emotion: 用户当前的分心状态
-        mode: 干预模式，支持 empathetic 和 strict
+    This keeps the application safe and usable even when the network or API
+    provider is unavailable.
     """
-    if mode == "empathetic":
-        return (
-            "你是一个极具同理心的心理辅导教练。"
-            f"用户目前由于【{emotion}】而感到焦虑。"
-            "请在 40 个字以内，用极其温和、接纳的语气，给出一个简单的物理微动作建议"
-            "（如喝水、深呼吸），帮助他们平复情绪并重新开始。"
-        )
-
-    if mode == "strict":
-        return (
-            "你是一个极其严厉的纪律教官。"
-            f"用户目前由于【{emotion}】而试图逃避任务。"
-            "你必须在 40 个字以内，用极其严厉、不留情面的命令式语气，"
-            "下达一个必须立即执行的物理动作指令，打断他们的拖延行为。"
-        )
-
-    raise ValueError("mode 仅支持 'empathetic' 或 'strict'")
+    if temp >= 40:
+        return "[CRITICAL_HOT]"
+    if temp > 26:
+        return "[HOT]"
+    if temp < 22:
+        return "[COLD]"
+    if humi > 60:
+        return "[HUMID]"
+    return "[NORMAL]"
 
 
-def get_local_fallback_task(emotion: str) -> str:
+def build_environment_prompt(temp: float, humi: float) -> str:
     """
-    根据情绪关键词返回本地降级微任务建议。
-
-    参数：
-        emotion: 用户当前的分心情绪
+    Build the strict system prompt for elder-care environment evaluation.
     """
-    normalized_emotion = (emotion or "").strip()
+    return (
+        "你是一个专业的独居老人监护助手。输入是当前的室内温度（temp）和湿度（humi）。"
+        "请结合老年人最适宜的居住环境（22-26℃，湿度 40-60%）进行判断。\n\n"
+        "输出约束： 严禁输出长篇大论。你只需要输出以下四个标签之一："
+        "[HOT], [COLD], [HUMID], [NORMAL]。如果数值极其离谱（如 40 度），"
+        "请输出 [CRITICAL_HOT]。"
+        f"\n\n当前输入：temp={temp}, humi={humi}。"
+    )
 
-    for keyword, task in LOCAL_FALLBACK_TASKS.items():
-        if keyword in normalized_emotion:
-            return task
 
-    return FALLBACK_TEXT
-
-
-def get_micro_task(emotion: str, mode: str = "empathetic") -> str:
+def evaluate_environment_state(temp, humi) -> str:
     """
-    根据用户当前的分心情绪和干预模式，调用大模型生成微动作指令。
+    Evaluate the current room temperature and humidity through an LLM.
 
-    参数：
-        emotion: 用户当前的分心状态，例如“😰 焦虑”“🥱 枯燥”
-        mode: 干预模式，默认值为 'empathetic'，支持 'strict'
+    Parameters:
+        temp: Current indoor temperature.
+        humi: Current indoor humidity percentage.
 
-    返回：
-        模型生成的微动作指令；如果接口调用失败，则返回本地降级结果。
+    Returns:
+        One strict environment label:
+        [HOT], [COLD], [HUMID], [NORMAL], or [CRITICAL_HOT].
+
+    Raises:
+        ValueError: If LLM_API_KEY is not configured in .env.
     """
-    # 如果没有读取到 API Key，直接抛出明确错误
     if not API_KEY:
         raise ValueError("未找到 LLM_API_KEY，请检查 .env 文件配置")
 
-    system_prompt = build_system_prompt(emotion, mode)
+    try:
+        temp_value = float(temp)
+        humi_value = float(humi)
+    except (TypeError, ValueError):
+        return "[NORMAL]"
+
+    fallback_label = get_local_environment_label(temp_value, humi_value)
+    system_prompt = build_environment_prompt(temp_value, humi_value)
 
     headers = {
         "Authorization": f"Bearer {API_KEY}",
@@ -93,13 +84,10 @@ def get_micro_task(emotion: str, mode: str = "empathetic") -> str:
         "model": MODEL_NAME,
         "messages": [
             {"role": "system", "content": system_prompt},
-            {
-                "role": "user",
-                "content": f"我的分心情绪是：{emotion}。请直接给我一个微动作指令。",
-            },
+            {"role": "user", "content": "请只输出一个环境状态标签。"},
         ],
-        "temperature": 0.3,
-        "max_tokens": 60,
+        "temperature": 0,
+        "max_tokens": 20,
     }
 
     try:
@@ -107,11 +95,12 @@ def get_micro_task(emotion: str, mode: str = "empathetic") -> str:
         response.raise_for_status()
 
         result = response.json()
-        content = result["choices"][0]["message"]["content"].strip()
+        label = result["choices"][0]["message"]["content"].strip()
 
-        if content:
-            return content
-        return get_local_fallback_task(emotion)
+        if label in VALID_LABELS:
+            return label
+
+        return fallback_label
 
     except (
         requests.Timeout,
@@ -123,10 +112,8 @@ def get_micro_task(emotion: str, mode: str = "empathetic") -> str:
         ValueError,
         TypeError,
     ):
-        return get_local_fallback_task(emotion)
+        return fallback_label
 
 
 if __name__ == "__main__":
-    # 简单本地测试：默认使用同理心模式
-    test_emotion = "😰 焦虑"
-    print(get_micro_task(test_emotion))
+    print(evaluate_environment_state(28.5, 65))

@@ -1,137 +1,89 @@
 import csv
-from collections import Counter, defaultdict
 from datetime import datetime
 from pathlib import Path
 
 
-# 数据文件保存到当前脚本所在目录，便于项目内直接使用
-CSV_FILE = Path(__file__).resolve().parent / "focus_data.csv"
+# Store elderly environment logs in the same directory as this script.
+LOG_FILE = Path(__file__).resolve().parent / "elderly_health_logs.csv"
 
-# 当前版本使用的 CSV 表头
-CSV_HEADERS = ["Timestamp", "Duration_Seconds", "Emotion", "Mode_Used"]
-
-
-def get_default_report() -> dict:
-    """返回无数据或异常场景下的默认分析结果。"""
-    return {
-        "Total Interruptions": 0,
-        "Top Emotion Trigger": "",
-        "Average Focus Duration By Mode": {
-            "strict": 0,
-            "empathetic": 0,
-        },
-    }
+# Current CSV schema for the elder-care environment monitoring system.
+CSV_HEADERS = ["Timestamp", "Room_Temp", "Room_Humi", "Alert_Type"]
 
 
-def log_distraction(study_duration_seconds, emotion, mode_used="empathetic") -> None:
+def log_environment_event(room_temp, room_humi, alert_type, timestamp=None) -> None:
     """
-    记录一次分心事件到本地 CSV 文件中。
+    Append one environment monitoring record to elderly_health_logs.csv.
 
-    参数：
-        study_duration_seconds: 用户已专注时长，单位为秒，例如 720
-        emotion: 本次触发分心的情绪原因，例如“😰 焦虑”
-        mode_used: 本次使用的干预模式，默认是 empathetic
+    Parameters:
+        room_temp: Current room temperature.
+        room_humi: Current room humidity percentage.
+        alert_type: AI evaluation label, for example "[HOT]" or "[NORMAL]".
+        timestamp: Optional timestamp string. If omitted, current local time is used.
     """
-    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    file_exists = CSV_FILE.exists()
+    log_time = timestamp or datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    file_exists = LOG_FILE.exists()
 
-    with open(CSV_FILE, mode="a", newline="", encoding="utf-8-sig") as csv_file:
+    with open(LOG_FILE, mode="a", newline="", encoding="utf-8-sig") as csv_file:
         writer = csv.writer(csv_file)
 
         if not file_exists:
             writer.writerow(CSV_HEADERS)
 
-        writer.writerow([timestamp, study_duration_seconds, emotion, mode_used])
+        writer.writerow([log_time, room_temp, room_humi, alert_type])
 
 
-def generate_analytics_report() -> dict:
+def log_sensor_alert(timestamp, room_temp, room_humi, alert_type) -> None:
     """
-    读取 focus_data.csv，并生成基础统计报告。
+    Compatibility wrapper for the sensor monitor.
 
-    返回：
-        一个包含以下信息的字典：
-        - Total Interruptions: 总计打断次数
-        - Top Emotion Trigger: 最常见的分心原因
-        - Average Focus Duration By Mode: strict 与 empathetic 模式下的平均专注时长
+    This keeps the name used by sensor_monitor.py while writing to the new
+    elderly_health_logs.csv schema.
     """
-    default_report = get_default_report()
+    log_environment_event(
+        room_temp=room_temp,
+        room_humi=room_humi,
+        alert_type=alert_type,
+        timestamp=timestamp,
+    )
 
+
+def get_recent_logs(n=10) -> list[dict]:
+    """
+    Read the most recent environment logs for the Streamlit dashboard.
+
+    Parameters:
+        n: Number of latest rows to return. Defaults to 10.
+
+    Returns:
+        A list of dictionaries ordered from newest to oldest. If the file does
+        not exist, is empty, or cannot be read, an empty list is returned.
+    """
     try:
-        if not CSV_FILE.exists():
-            return default_report
+        limit = int(n)
+        if limit <= 0:
+            return []
 
-        with open(CSV_FILE, mode="r", newline="", encoding="utf-8-sig") as csv_file:
+        if not LOG_FILE.exists():
+            return []
+
+        with open(LOG_FILE, mode="r", newline="", encoding="utf-8-sig") as csv_file:
             reader = csv.DictReader(csv_file)
 
-            # 文件为空、没有表头，或者表头字段不完整时，直接返回默认值
             if not reader.fieldnames:
-                return default_report
+                return []
 
-            required_fields = {"Timestamp", "Duration_Seconds", "Emotion", "Mode_Used"}
+            required_fields = set(CSV_HEADERS)
             if not required_fields.issubset(set(reader.fieldnames)):
-                return default_report
+                return []
 
-            emotion_counter = Counter()
-            mode_duration_map = defaultdict(list)
-            total_interruptions = 0
+            rows = list(reader)
 
-            for row in reader:
-                duration_text = (row.get("Duration_Seconds") or "").strip()
-                emotion = (row.get("Emotion") or "").strip()
-                mode_used = (row.get("Mode_Used") or "").strip().lower()
+        return rows[-limit:][::-1]
 
-                # 跳过完全空行
-                if not duration_text and not emotion and not mode_used:
-                    continue
-
-                try:
-                    duration_seconds = int(float(duration_text))
-                except (ValueError, TypeError):
-                    # 单行数据异常时跳过，不影响整体报表生成
-                    continue
-
-                total_interruptions += 1
-
-                if emotion:
-                    emotion_counter[emotion] += 1
-
-                if mode_used in ("strict", "empathetic"):
-                    mode_duration_map[mode_used].append(duration_seconds)
-
-            if total_interruptions == 0:
-                return default_report
-
-            top_emotion = ""
-            if emotion_counter:
-                top_emotion = emotion_counter.most_common(1)[0][0]
-
-            strict_durations = mode_duration_map.get("strict", [])
-            empathetic_durations = mode_duration_map.get("empathetic", [])
-
-            strict_average = (
-                round(sum(strict_durations) / len(strict_durations), 2)
-                if strict_durations
-                else 0
-            )
-            empathetic_average = (
-                round(sum(empathetic_durations) / len(empathetic_durations), 2)
-                if empathetic_durations
-                else 0
-            )
-
-            return {
-                "Total Interruptions": total_interruptions,
-                "Top Emotion Trigger": top_emotion,
-                "Average Focus Duration By Mode": {
-                    "strict": strict_average,
-                    "empathetic": empathetic_average,
-                },
-            }
-
-    except (FileNotFoundError, PermissionError, OSError, csv.Error):
-        return default_report
+    except (FileNotFoundError, PermissionError, OSError, csv.Error, ValueError, TypeError):
+        return []
 
 
 if __name__ == "__main__":
-    # 直接运行此文件时，打印当前统计结果，便于本地快速验证
-    print(generate_analytics_report())
+    # Local smoke test: print the latest 10 records without modifying the file.
+    print(get_recent_logs())
