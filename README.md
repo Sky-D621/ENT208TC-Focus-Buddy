@@ -1,109 +1,200 @@
-# Focus Buddy 🎯
+# Elderly Home Environment Companion
 
-> An empathetic, AI-powered study timer designed to intervene in academic anxiety and deadline paralysis through cognitive micro-tasks.
+> A lightweight Python-based environment sensing and family dashboard system for elders living alone.
 
 [![Python](https://img.shields.io/badge/Python-3.9+-blue.svg)](https://www.python.org/)
-[![Streamlit](https://img.shields.io/badge/Streamlit-1.32+-red.svg)](https://streamlit.io/)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![Streamlit](https://img.shields.io/badge/Streamlit-Dashboard-red.svg)](https://streamlit.io/)
+[![Serial](https://img.shields.io/badge/Hardware-M5Stack%20Serial-green.svg)](https://pyserial.readthedocs.io/)
 
-## 📖 Project Overview (项目简介)
+## Project Overview
 
-Traditional productivity applications (e.g., Forest, strict app blockers) rely on negative reinforcement and punitive measures to maintain user focus. However, recent psychological insights indicate that academic procrastination often stems from emotional dysregulation and task anxiety rather than a mere lack of discipline.
+This project has shifted from a Pomodoro focus tool into an independent-living elder-care prototype.
 
-**Focus Buddy** is a web-based intervention platform that rethinks the Pomodoro technique. Built entirely on Python and Streamlit, it replaces punitive lock-outs with an **"Empathy Intervention System"**. When users experience cognitive overload, they can trigger a distress state. The backend instantly captures their emotional context and leverages an LLM (Large Language Model) to generate a customized, low-friction micro-task (<40 words) to bridge the gap between anxiety and task resumption.
+The system listens to temperature and humidity data sent by an M5Stack device through a serial port, evaluates the room environment with an OpenAI-compatible LLM, plays local voice reminders when needed, records local CSV logs, and provides a Streamlit dashboard for family members to review the latest home conditions.
 
-## ✨ Core Features (核心功能)
+The current goal is not medical diagnosis. It is a lightweight environmental awareness and companionship layer that helps families notice uncomfortable or risky indoor conditions such as high temperature, low temperature, or high humidity.
 
-* **⏳ Non-Punitive Pomodoro Engine:** A robust countdown timer integrated with Streamlit's `session_state` to ensure stable time tracking across asynchronous UI updates and browser re-renders.
-* **🆘 Distress Trigger & Low-Friction Logging:** A prominent intervention button coupled with quick-tap emotion tags (e.g., 😰 Anxious, 🥱 Bored, 🤯 Overwhelmed) to capture user context without demanding high cognitive load (typing).
-* **🧠 LLM-Driven Cognitive Scaffolding:** Backend integration with Large Language Models via API. The system dynamically injects strict psychological system prompts to ensure the AI acts as a behavioral coach, providing immediate, physical micro-actions rather than generic motivational text.
-* **📊 Local Telemetry & Analytics:** A lightweight, dependency-free local data logging mechanism (`logger.py`). It automatically appends session duration, interruption timestamps, and emotional triggers to a local `.csv` file for continuous behavioral analysis.
+## Core Features
 
-## 🏗️ Technical Architecture (技术架构)
+- **Serial Sensor Monitoring:** `sensor_monitor.py` continuously listens to M5Stack serial data and automatically reconnects if the hardware disconnects.
+- **Environment Evaluation:** `ai_coach.py` exposes `evaluate_environment_state(temp, humi)` and returns strict labels such as `[HOT]`, `[COLD]`, `[HUMID]`, `[NORMAL]`, and `[CRITICAL_HOT]`.
+- **Alarm Cooldown:** The backend prevents the same abnormal state from repeatedly triggering AI calls and voice playback within a 30-minute window.
+- **Local Audio Playback:** Warning labels are mapped to local audio files under the `audio/` directory.
+- **Local CSV Logging:** `logger.py` writes environment events into `elderly_health_logs.csv` with UTF-8-safe encoding.
+- **Family Dashboard:** `app.py` displays live temperature, live humidity, historical temperature trend, recent alert records, and backend polling status.
+- **Mock Data Generator:** `generate_mock_data.py` can generate realistic test data when no hardware is connected.
 
-This application is engineered as a lightweight, full-stack Python application, optimized for rapid iteration and deployment.
+## Technical Architecture
 
-* **Frontend:** `Streamlit` (Declarative Python UI framework)
-* **Backend Logic:** Pure `Python` standard libraries
-* **AI Engine:** DeepSeek / Kimi / OpenAI Compatible API
-* **Data Persistence:** Local flat-file storage (`CSV`/`JSON`)
+- **Hardware Input:** M5Stack sends temperature and humidity strings over Serial.
+- **Backend Daemon:** `sensor_monitor.py` parses sensor readings, handles reconnects, enforces cooldown, calls AI evaluation, plays audio, and logs events.
+- **AI Layer:** `ai_coach.py` calls an OpenAI-compatible `/v1/chat/completions` endpoint using `LLM_API_KEY` from `.env`.
+- **Persistence:** `logger.py` stores local environment logs in CSV format.
+- **Dashboard:** `app.py` uses Streamlit to render metrics, charts, alerts, and backend health status.
 
-## 🚀 Installation & Setup (本地部署指南)
+## Directory Structure
 
-Follow these steps to run Focus Buddy locally on your machine.
-
-### 1. Clone the Repository
-
+```text
+ENT/
+├── .env                         # Local environment variables, ignored by Git
+├── .gitignore                   # Ignore rules for secrets, caches, and local data
+├── README.md                    # Project documentation
+└── Focus-Buddy/
+    ├── app.py                   # Streamlit family dashboard
+    ├── ai_coach.py              # LLM environment evaluation logic
+    ├── logger.py                # Local CSV logging and recent log queries
+    ├── sensor_monitor.py        # Background serial-monitoring daemon
+    ├── generate_mock_data.py    # Mock elder-care environment data generator
+    ├── requirements.txt         # Python dependencies
+    ├── elderly_health_logs.csv  # Generated local environment logs
+    └── audio/                   # Local voice reminder files
 ```
-git clone https://github.com/Sky-D621/ENT208TC-Focus-Buddy.git
-cd ENT208TC-Focus-Buddy
+
+## Environment Variables
+
+Create a `.env` file in the project root. Do not commit this file to GitHub.
+
+```dotenv
+LLM_API_KEY=your_api_key_here
+LLM_API_URL=https://api.deepseek.com/v1/chat/completions
+LLM_MODEL=deepseek-chat
+SENSOR_SERIAL_PORT=COM3
+SENSOR_BAUD_RATE=115200
 ```
 
-### 2. Set Up a Virtual Environment (Recommended)
+Notes:
 
-It is highly recommended to isolate project dependencies using Python's built-in `venv`.
+- `LLM_API_KEY` is required for real LLM evaluation.
+- `LLM_API_URL` can be changed to any OpenAI-compatible provider, such as DeepSeek or Kimi.
+- `SENSOR_SERIAL_PORT` should match the port used by your M5Stack device.
+- If the LLM request fails, backend logic falls back to deterministic local rules where applicable.
 
-```
-# Create a virtual environment named 'venv'
+## Installation
+
+From the project directory:
+
+```bash
+cd Focus-Buddy
 python -m venv venv
+```
 
-# Activate the virtual environment
-# On Windows:
+Activate the virtual environment:
+
+```bash
+# Windows
 venv\Scripts\activate
 
-# On macOS/Linux:
+# macOS/Linux
 source venv/bin/activate
 ```
 
-### 3. Install Dependencies
+Install dependencies:
 
-Install the required Python packages using `pip`.
-
-```
-pip install streamlit requests python-dotenv
+```bash
+pip install streamlit requests python-dotenv pyserial pygame pandas
 ```
 
-### 4. Environment Variables Configuration
+If you prefer using the existing dependency file:
 
-To keep API keys secure, Focus Buddy uses environment variables. Create a `.env` file in the root directory of the project and add your LLM API credentials.
-
-```
-# Create a .env file
-touch .env
+```bash
+pip install -r requirements.txt
 ```
 
-Inside the `.env` file, add the following (replace `your_api_key_here` with your actual key):
+## Running the System
 
+Start the backend sensor daemon in one terminal:
+
+```bash
+cd Focus-Buddy
+python sensor_monitor.py
 ```
-LLM_API_KEY=your_api_key_here
-LLM_BASE_URL=https://api.deepseek.com/v1
-```
 
-### 5. Run the Application
+Start the Streamlit dashboard in another terminal:
 
-Launch the Streamlit server. The application will automatically open in your default web browser at `http://localhost:8501`.
-
-```
+```bash
+cd Focus-Buddy
 streamlit run app.py
 ```
 
-## 📁 Directory Structure (目录结构)
+The dashboard will open at:
 
-```
-ENT/
-│
-├── requirements.txt      # Python package dependencies
-├── .env          
-├── .gitignore            # Git ignore rules (excludes .env and data files)
-└── README.md             # Project documentation
-└── Focus-Buddy
-    ├── app.py            # Main Streamlit application and UI routing
-    ├── logger.py         # Local CSV data persistence handlers
-    └── ai_coach.py       # LLM API integration and System Prompt logic
+```text
+http://localhost:8501
 ```
 
-## 🔒 Data Privacy Statement (数据隐私说明)
+## Testing Without Hardware
 
-Focus Buddy respects user privacy. All behavioral data, focus session durations, and emotional trigger logs are stored **locally** on the user's machine within a generated `focus_data.csv` file. No personal telemetry data is transmitted to external servers, with the sole exception of the anonymized emotional tags sent to the LLM API strictly for generating recovery interventions.
+If the M5Stack device is not connected yet, generate local mock records:
 
-*Focus Buddy - Act, Don't Just Answer.*
+```bash
+cd Focus-Buddy
+python generate_mock_data.py
+```
+
+This creates or overwrites:
+
+```text
+elderly_health_logs.csv
+```
+
+Then run:
+
+```bash
+streamlit run app.py
+```
+
+The dashboard should show temperature metrics, a historical trend chart, and recent alert rows based on mock data.
+
+## Expected Serial Input Format
+
+`sensor_monitor.py` accepts several common text formats, for example:
+
+```text
+temp=28.5,humi=60
+temperature: 28.5 humidity: 60
+T:28.5 H:60
+```
+
+Each valid line should contain one temperature value and one humidity value.
+
+## Data Files
+
+The main local log file is:
+
+```text
+Focus-Buddy/elderly_health_logs.csv
+```
+
+Its schema is:
+
+```csv
+Timestamp,Room_Temp,Room_Humi,Alert_Type
+```
+
+The backend health indicator uses:
+
+```text
+Focus-Buddy/sensor_monitor_heartbeat.txt
+```
+
+The Streamlit dashboard checks this heartbeat file to determine whether `sensor_monitor.py` is actively polling hardware.
+
+## Privacy And Safety
+
+All sensor logs are stored locally in CSV files. The only external request is the environment evaluation request sent to the configured LLM API provider, which contains room temperature and humidity values.
+
+This project is an environmental monitoring prototype. It should not be used as a medical device, emergency response system, or sole safety mechanism for an elder living alone.
+
+## Git Safety
+
+Secrets and local runtime data should not be committed.
+
+Recommended ignored files include:
+
+```gitignore
+.env
+__pycache__/
+*.pyc
+Focus-Buddy/elderly_health_logs.csv
+Focus-Buddy/sensor_monitor_heartbeat.txt
+```

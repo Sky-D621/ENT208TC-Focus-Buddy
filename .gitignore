@@ -7,5 +7,10 @@ __pycache__/
 
 # Local data files
 focus_data.csv
-
-generate_mock_data.py
+sensor_alerts.csv
+elderly_health_logs.csv
+sensor_monitor_heartbeat.txt
+Focus-Buddy/focus_data.csv
+Focus-Buddy/sensor_alerts.csv
+Focus-Buddy/elderly_health_logs.csv
+Focus-Buddy/sensor_monitor_heartbeat.txt
