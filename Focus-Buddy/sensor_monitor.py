@@ -1,4 +1,5 @@
 import os
+import json
 import re
 import time
 from datetime import datetime
@@ -13,7 +14,7 @@ from logger import log_sensor_alert
 
 # Serial port configuration.
 # Override these values in .env if your M5Stack uses a different port or baud rate.
-SERIAL_PORT = os.getenv("SENSOR_SERIAL_PORT", "COM3")
+SERIAL_PORT = os.getenv("SENSOR_SERIAL_PORT", "COM5")
 BAUD_RATE = int(os.getenv("SENSOR_BAUD_RATE", "115200"))
 SERIAL_TIMEOUT_SECONDS = 2
 RECONNECT_DELAY_SECONDS = 5
@@ -32,6 +33,7 @@ last_alarm_at = {}
 # Local audio mapping. Keep the files under ./audio beside this script.
 BASE_DIR = Path(__file__).resolve().parent
 HEARTBEAT_FILE = BASE_DIR / "sensor_monitor_heartbeat.txt"
+SENSOR_DEBUG_FILE = BASE_DIR / "sensor_monitor_debug.json"
 AUDIO_FILES = {
     "[CRITICAL_HOT]": BASE_DIR / "audio" / "critical_hot_check_now.mp3",
     "[HOT]": BASE_DIR / "audio" / "hot_drink_water.mp3",
@@ -44,6 +46,22 @@ AUDIO_FILES = {
 
 # Only these labels are valid model outputs.
 VALID_LABELS = {"[CRITICAL_HOT]", "[HOT]", "[COLD]", "[HUMID]", "[NORMAL]"}
+
+
+def write_sensor_debug(status: str, detail: str = "", raw_line: str = "") -> None:
+    """Write lightweight serial diagnostics for the API/frontend."""
+    try:
+        payload = {
+            "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "status": status,
+            "detail": detail,
+            "raw_line": raw_line,
+            "port": SERIAL_PORT,
+            "baud": BAUD_RATE,
+        }
+        SENSOR_DEBUG_FILE.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+    except OSError:
+        pass
 
 
 def parse_sensor_line(raw_line: str) -> tuple[float, float] | None:
@@ -62,13 +80,37 @@ def parse_sensor_line(raw_line: str) -> tuple[float, float] | None:
     if not normalized:
         return None
 
+    # M5Stack often prefixes payloads with a channel name, for example:
+    # "DATA:25.4,58.8". Strip the prefix and parse the numeric payload below.
+    if ":" in normalized:
+        prefix, payload_text = normalized.split(":", 1)
+        if prefix.strip().upper() in {"DATA", "DHT", "SENSOR", "ENV"}:
+            normalized = payload_text.strip()
+
+    try:
+        payload = json.loads(normalized)
+        temp = payload.get("temp", payload.get("temperature"))
+        humi = payload.get("humi", payload.get("humidity"))
+        if temp is not None and humi is not None:
+            return float(temp), float(humi)
+    except (json.JSONDecodeError, AttributeError, TypeError, ValueError):
+        pass
+
+    # Accept simple CSV-like output, for example: "25.6,48.2".
+    csv_match = re.fullmatch(
+        r"\s*(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)\s*",
+        normalized,
+    )
+    if csv_match:
+        return float(csv_match.group(1)), float(csv_match.group(2))
+
     temp_match = re.search(
-        r"(?:temp|temperature|t)\s*[:=]\s*(-?\d+(?:\.\d+)?)",
+        r"['\"]?(?:temp|temperature|t|温度)['\"]?\s*[:=：]\s*(-?\d+(?:\.\d+)?)",
         normalized,
         flags=re.IGNORECASE,
     )
     humi_match = re.search(
-        r"(?:humi|humidity|h)\s*[:=]\s*(-?\d+(?:\.\d+)?)",
+        r"['\"]?(?:humi|humidity|h|湿度)['\"]?\s*[:=：]\s*(-?\d+(?:\.\d+)?)",
         normalized,
         flags=re.IGNORECASE,
     )
@@ -171,7 +213,9 @@ def write_monitor_heartbeat(temp: float, humi: float) -> None:
     try:
         timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         HEARTBEAT_FILE.write_text(f"{timestamp},{temp},{humi}", encoding="utf-8")
+        write_sensor_debug("LIVE_READING", f"temp={temp}, humi={humi}")
     except OSError as exc:
+        write_sensor_debug("HEARTBEAT_WRITE_FAILED", str(exc))
         print(f"Failed to write monitor heartbeat: {exc}")
 
 
@@ -267,23 +311,40 @@ def monitor_serial_forever() -> None:
 
         try:
             print(f"Connecting to serial port {SERIAL_PORT} at {BAUD_RATE} baud...")
+            write_sensor_debug("CONNECTING")
             serial_client = serial.Serial(
                 SERIAL_PORT,
                 BAUD_RATE,
                 timeout=SERIAL_TIMEOUT_SECONDS,
             )
             print("Serial connection established.")
+            write_sensor_debug("CONNECTED")
+            empty_read_count = 0
 
             while True:
                 try:
                     raw_bytes = serial_client.readline()
                     if not raw_bytes:
+                        empty_read_count += 1
+                        if empty_read_count % 10 == 0:
+                            write_sensor_debug(
+                                "NO_DATA",
+                                f"No serial data after {empty_read_count * SERIAL_TIMEOUT_SECONDS}s",
+                            )
+                            print(
+                                f"No serial data received from {SERIAL_PORT} "
+                                f"after {empty_read_count * SERIAL_TIMEOUT_SECONDS}s."
+                            )
                         continue
+                    empty_read_count = 0
 
                     raw_line = raw_bytes.decode("utf-8", errors="ignore").strip()
+                    print(f"Serial line: {raw_line!r}")
+                    write_sensor_debug("RAW_LINE", raw_line=raw_line)
                     parsed = parse_sensor_line(raw_line)
 
                     if parsed is None:
+                        write_sensor_debug("UNPARSEABLE", raw_line=raw_line)
                         print(f"Skipped unparsable serial line: {raw_line!r}")
                         continue
 
@@ -291,14 +352,18 @@ def monitor_serial_forever() -> None:
                     handle_sensor_reading(temp, humi)
 
                 except SerialException as exc:
+                    write_sensor_debug("SERIAL_ERROR", str(exc))
                     print(f"Serial device error: {exc}. Reconnecting soon.")
                     break
                 except Exception as exc:
+                    write_sensor_debug("READING_ERROR", str(exc))
                     print(f"Unexpected reading error: {exc}. Continuing monitor loop.")
 
         except SerialException as exc:
+            write_sensor_debug("OPEN_FAILED", str(exc))
             print(f"Unable to open serial port: {exc}. Retrying in {RECONNECT_DELAY_SECONDS}s.")
         except Exception as exc:
+            write_sensor_debug("MONITOR_ERROR", str(exc))
             print(f"Unexpected monitor error: {exc}. Retrying in {RECONNECT_DELAY_SECONDS}s.")
         finally:
             if serial_client and serial_client.is_open:

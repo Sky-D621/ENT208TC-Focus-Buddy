@@ -10,7 +10,7 @@ load_dotenv()
 # OpenAI-compatible API configuration.
 API_KEY = os.getenv("LLM_API_KEY")
 API_URL = os.getenv("LLM_API_URL", "https://api.deepseek.com/v1/chat/completions")
-MODEL_NAME = os.getenv("LLM_MODEL", "deepseek-chat")
+MODEL_NAME = os.getenv("LLM_MODEL", "deepseek-v4-pro")
 
 # The model must only return one of these labels.
 VALID_LABELS = {"[HOT]", "[COLD]", "[HUMID]", "[NORMAL]", "[CRITICAL_HOT]"}

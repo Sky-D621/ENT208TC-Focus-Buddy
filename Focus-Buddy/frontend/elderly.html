@@ -1,0 +1,468 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>居家守护 · Elder View</title>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Serif+SC:wght@400;700;900&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg:     #fdf3e7;
+    --card:   #fffdf8;
+    --border: #e8d5b7;
+    --text:   #2d1f0e;
+    --muted:  #9a7a55;
+    --accent: #bf5a22;
+    --green:  #2e7d3a;
+    --warn:   #c97a10;
+    --danger: #b02020;
+    --shadow: 0 8px 40px rgba(100,55,10,.13);
+    --radius: 28px;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    font-family: 'Noto Serif SC', serif;
+    background:
+      radial-gradient(ellipse at 20% 0%, rgba(210,140,70,.18) 0%, transparent 55%),
+      radial-gradient(ellipse at 80% 100%, rgba(180,100,40,.12) 0%, transparent 50%),
+      var(--bg);
+    color: var(--text);
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 32px 20px 60px;
+  }
+
+  header { text-align: center; margin-bottom: 24px; }
+  header h1 { font-size: 2rem; font-weight: 900; color: var(--accent); letter-spacing: .1em; }
+  header p  { font-size: .9rem; color: var(--muted); margin-top: 4px; }
+
+  /* 时钟 */
+  #clock-wrap {
+    background: var(--card); border: 1.5px solid var(--border);
+    border-radius: var(--radius); padding: 18px 20px 14px;
+    text-align: center; box-shadow: var(--shadow);
+    margin-bottom: 20px; width: 100%; max-width: 520px;
+  }
+  #clock {
+    font-family: 'DM Mono', monospace; font-size: 3.8rem; font-weight: 500;
+    letter-spacing: .04em; line-height: 1;
+    background: linear-gradient(135deg, var(--accent), #e8903a);
+    -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+  }
+  #date-str { font-size: .9rem; color: var(--muted); margin-top: 6px; }
+
+  /* 传感器 */
+  .sensor-row { display: flex; gap: 16px; justify-content: center; margin-bottom: 20px; flex-wrap: wrap; width: 100%; max-width: 520px; }
+  .sensor-card {
+    flex: 1; min-width: 180px;
+    background: var(--card); border: 2px solid var(--border);
+    border-radius: var(--radius); padding: 20px 16px 18px;
+    text-align: center; box-shadow: var(--shadow);
+    transition: border-color .3s; position: relative; overflow: hidden;
+  }
+  .sensor-card::before {
+    content: ''; position: absolute; top: 0; left: 0; right: 0; height: 4px;
+    background: linear-gradient(90deg, var(--border), transparent);
+    transition: background .3s;
+  }
+  .sensor-card.warn   { border-color: var(--warn); }
+  .sensor-card.warn::before   { background: linear-gradient(90deg, var(--warn), transparent); }
+  .sensor-card.danger { border-color: var(--danger); }
+  .sensor-card.danger::before { background: linear-gradient(90deg, var(--danger), transparent); }
+  .sensor-card .icon  { font-size: 1.6rem; margin-bottom: 6px; display: block; }
+  .sensor-card .label { font-size: .85rem; color: var(--muted); margin-bottom: 8px; }
+  .sensor-card .value { font-size: 4rem; font-weight: 900; line-height: 1; }
+  .sensor-card .unit  { font-size: 1.2rem; color: var(--muted); }
+
+  /* 告警 */
+  #alert-banner {
+    width: 100%; max-width: 520px;
+    padding: 14px 20px 14px 16px; border-radius: 14px;
+    font-size: 1.1rem; font-weight: 700;
+    margin-bottom: 20px; display: none; border-left: 6px solid;
+    box-shadow: var(--shadow);
+  }
+  #alert-banner.show       { display: flex; align-items: center; gap: 10px; animation: slideIn .4s ease; }
+  #alert-banner.lvl-normal { background: #edf7ef; color: var(--green);  border-color: var(--green); }
+  #alert-banner.lvl-warn   { background: #fff8ec; color: var(--warn);   border-color: var(--warn); }
+  #alert-banner.lvl-danger { background: #fdeaea; color: var(--danger); border-color: var(--danger); }
+
+  /* 提醒 */
+  #reminder-box {
+    width: 100%; max-width: 520px;
+    background: var(--card); border: 1.5px solid var(--border);
+    border-radius: var(--radius); padding: 18px 22px;
+    margin-bottom: 20px; box-shadow: var(--shadow);
+  }
+  #reminder-box h2 {
+    font-size: 1rem; color: var(--muted); letter-spacing: .08em;
+    margin-bottom: 12px; padding-bottom: 10px; border-bottom: 1px solid var(--border);
+  }
+  .reminder-item {
+    display: flex; align-items: center; gap: 12px;
+    padding: 10px 0; font-size: 1.1rem;
+    border-bottom: 1px dashed var(--border);
+  }
+  .reminder-item:last-child { border-bottom: none; }
+  .reminder-item .r-time {
+    font-family: 'DM Mono', monospace; font-size: .9rem;
+    color: var(--muted); margin-left: auto;
+    background: var(--bg); padding: 2px 9px;
+    border-radius: 20px; border: 1px solid var(--border);
+  }
+
+  /* 状态栏 */
+  #status-text {
+    font-family: 'DM Mono', monospace;
+    font-size: .8rem; color: var(--muted);
+    text-align: center; margin-bottom: 32px;
+  }
+  #dot {
+    display: inline-block; width: 8px; height: 8px;
+    border-radius: 50%; background: #bbb; margin-right: 5px; vertical-align: middle;
+  }
+  #dot.online { background: var(--green); animation: dotPulse 2s infinite; }
+
+  /* ── 聊天区 ── */
+  #chat-section {
+    display: flex; flex-direction: column; align-items: center;
+    width: 100%; max-width: 520px;
+  }
+
+  /* 对话气泡 */
+  #chat-log {
+    width: 100%; max-height: 220px; overflow-y: auto;
+    margin-bottom: 24px; display: flex; flex-direction: column; gap: 10px;
+  }
+  .bubble {
+    max-width: 80%; padding: 12px 16px; border-radius: 18px;
+    font-size: 1.05rem; line-height: 1.6; word-break: break-word;
+  }
+  .bubble.user {
+    align-self: flex-end;
+    background: var(--accent); color: #fff;
+    border-bottom-right-radius: 4px;
+  }
+  .bubble.bot {
+    align-self: flex-start;
+    background: var(--card); border: 1.5px solid var(--border);
+    color: var(--text); border-bottom-left-radius: 4px;
+  }
+  .bubble.thinking { opacity: .5; font-style: italic; }
+
+  /* 波动圆形按钮 */
+  #chat-btn-wrap { position: relative; display: flex; align-items: center; justify-content: center; width: 140px; height: 140px; }
+  .ring {
+    position: absolute; border-radius: 50%;
+    border: 2px solid rgba(191,90,34,.3);
+    animation: ripple 2.4s ease-out infinite;
+  }
+  .ring:nth-child(2) { animation-delay: .8s; }
+  .ring:nth-child(3) { animation-delay: 1.6s; }
+  #chat-btn {
+    position: relative; z-index: 1;
+    width: 90px; height: 90px; border-radius: 50%;
+    background: linear-gradient(135deg, var(--accent), #e07830);
+    border: none; cursor: pointer;
+    box-shadow: 0 6px 28px rgba(191,90,34,.4);
+    display: flex; align-items: center; justify-content: center;
+    transition: transform .15s, box-shadow .15s;
+  }
+  #chat-btn:hover  { transform: scale(1.06); box-shadow: 0 10px 36px rgba(191,90,34,.5); }
+  #chat-btn:active { transform: scale(.94); }
+  #chat-btn.listening { background: linear-gradient(135deg, #b02020, #e04040); }
+  #chat-btn svg { width: 36px; height: 36px; fill: #fff; }
+
+  #chat-hint {
+    margin-top: 14px; font-size: .9rem; color: var(--muted); text-align: center;
+  }
+
+  /* 文字输入备用 */
+  #text-input-row {
+    display: flex; gap: 8px; width: 100%; margin-top: 16px;
+  }
+  #chat-input {
+    flex: 1; background: var(--card); border: 1.5px solid var(--border);
+    border-radius: 50px; padding: 10px 18px; font-size: 1rem;
+    font-family: 'Noto Serif SC', serif; color: var(--text); outline: none;
+    transition: border-color .2s;
+  }
+  #chat-input:focus { border-color: var(--accent); }
+  #send-btn {
+    background: var(--accent); color: #fff; border: none;
+    border-radius: 50px; padding: 10px 20px; font-size: .95rem;
+    font-family: 'Noto Serif SC', serif; font-weight: 700; cursor: pointer;
+    transition: opacity .2s;
+  }
+  #send-btn:hover { opacity: .85; }
+
+  @keyframes slideIn {
+    from { opacity: 0; transform: translateX(-10px); }
+    to   { opacity: 1; transform: translateX(0); }
+  }
+  @keyframes dotPulse {
+    0%,100% { box-shadow: 0 0 0 3px rgba(46,125,58,.2); }
+    50%      { box-shadow: 0 0 0 6px rgba(46,125,58,.08); }
+  }
+  @keyframes ripple {
+    0%   { width: 90px; height: 90px; opacity: .7; }
+    100% { width: 140px; height: 140px; opacity: 0; }
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>居家守护 <span style="font-size:1.1rem;font-weight:400;color:var(--muted)">Home Guardian</span></h1>
+  <p>实时环境监测 · 老人端 &nbsp;|&nbsp; Live Environment Monitor · Elder View</p>
+</header>
+
+<div id="clock-wrap">
+  <div id="clock">--:--:--</div>
+  <div id="date-str">加载中…</div>
+</div>
+
+<div class="sensor-row">
+  <div class="sensor-card" id="temp-card">
+    <span class="icon">🌡️</span>
+    <div class="label">室内温度 · Temperature</div>
+    <div class="value" id="temp-val">--<span class="unit">°C</span></div>
+  </div>
+  <div class="sensor-card" id="humi-card">
+    <span class="icon">💧</span>
+    <div class="label">室内湿度 · Humidity</div>
+    <div class="value" id="humi-val">--<span class="unit">%</span></div>
+  </div>
+</div>
+
+<div id="alert-banner"></div>
+
+<div id="reminder-box">
+  <h2>📅 今日提醒 · Today's Reminders</h2>
+  <div id="reminder-list">
+    <p style="color:var(--muted);font-size:.9rem">暂无提醒 · No reminders</p>
+  </div>
+</div>
+
+<div id="status-text">
+  <span id="dot"></span><span id="conn-label">连接中… Connecting…</span>
+</div>
+
+<!-- 聊天区 -->
+<div id="chat-section">
+  <div id="chat-log"></div>
+
+  <div id="chat-btn-wrap">
+    <div class="ring"></div>
+    <div class="ring"></div>
+    <div class="ring"></div>
+    <button id="chat-btn" title="按住说话 / Hold to speak">
+      <!-- 麦克风图标 -->
+      <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+        <path d="M12 1a4 4 0 0 1 4 4v6a4 4 0 0 1-8 0V5a4 4 0 0 1 4-4zm6.5 9a.5.5 0 0 1 .5.5A7 7 0 0 1 12.5 17v2.5H15a.5.5 0 0 1 0 1H9a.5.5 0 0 1 0-1h2.5V17A7 7 0 0 1 5 10.5a.5.5 0 0 1 1 0 6 6 0 0 0 12 0 .5.5 0 0 1 .5-.5z"/>
+      </svg>
+    </button>
+  </div>
+  <div id="chat-hint">按住说话 · Hold to speak</div>
+
+  <div id="text-input-row">
+    <input id="chat-input" type="text" placeholder="或者在这里输入… / or type here…">
+    <button id="send-btn" onclick="sendText()">发送</button>
+  </div>
+</div>
+
+<script>
+  const API = 'http://localhost:8000';
+
+  let lastMessage = '';
+  let spokenSet   = new Set();
+  let reminders   = [];
+  const firedSet  = new Set();
+
+  // ── 时钟 ──
+  function updateClock() {
+    const now = new Date();
+    document.getElementById('clock').textContent = now.toTimeString().slice(0, 8);
+    const days = ['星期日','星期一','星期二','星期三','星期四','星期五','星期六'];
+    const zhDate = `${now.getFullYear()}年${now.getMonth()+1}月${now.getDate()}日 ${days[now.getDay()]}`;
+    const enDate = now.toLocaleDateString('en-US', { weekday:'long', month:'long', day:'numeric' });
+    document.getElementById('date-str').textContent = `${zhDate}  ·  ${enDate}`;
+  }
+  setInterval(updateClock, 1000);
+  updateClock();
+
+  // ── TTS ──
+  function speak(text) {
+    if (!text || !window.speechSynthesis) return;
+    window.speechSynthesis.cancel();
+    const u = new SpeechSynthesisUtterance(text);
+    u.lang = 'zh-CN'; u.rate = 0.9;
+    window.speechSynthesis.speak(u);
+  }
+
+  // ── 传感器状态 ──
+  function getLevel(t, h) {
+    if (t >= 38) return 'danger';
+    if (t >= 30 || t <= 16 || h >= 80) return 'warn';
+    return 'normal';
+  }
+
+  async function fetchStatus() {
+    try {
+      const data = await (await fetch(`${API}/api/status`)).json();
+      const online = data.status === 'ONLINE' || data.status === 'DEGRADED';
+      document.getElementById('dot').className = online ? 'online' : '';
+      document.getElementById('conn-label').textContent = online
+        ? '传感器在线 · Sensor Online' : '传感器离线 · Sensor Offline';
+      if (data.temp !== null) {
+        const t = parseFloat(data.temp), h = parseFloat(data.humi);
+        document.getElementById('temp-val').innerHTML = `${t.toFixed(1)}<span class="unit">°C</span>`;
+        document.getElementById('humi-val').innerHTML = `${h.toFixed(1)}<span class="unit">%</span>`;
+        const lv = getLevel(t, h);
+        document.getElementById('temp-card').className = `sensor-card ${lv === 'normal' ? '' : lv}`;
+        document.getElementById('humi-card').className = `sensor-card ${lv === 'normal' ? '' : lv}`;
+        const msgZh = data.message || '', msgEn = data.message_en || '';
+        const banner = document.getElementById('alert-banner');
+        if (msgZh.trim() || msgEn.trim()) {
+          banner.textContent = msgZh + (msgEn ? `  ·  ${msgEn}` : '');
+          banner.className = `show lvl-${lv}`;
+          const key = msgZh || msgEn;
+          if (!spokenSet.has(key)) { spokenSet.add(key); speak(msgZh || msgEn); }
+          lastMessage = msgZh || msgEn;
+        } else { banner.className = ''; }
+      }
+    } catch(e) {
+      document.getElementById('conn-label').textContent = '无法连接后端 · Cannot reach backend';
+    }
+  }
+
+  // ── 提醒 ──
+  async function fetchReminders() {
+    try {
+      const data = await (await fetch(`${API}/api/settings`)).json();
+      const list = document.getElementById('reminder-list');
+      const items = []; reminders = [];
+      (data.alarms || []).forEach(a => {
+        if (a.time && a.label) {
+          items.push({ icon: '⏰', text: a.label, time: a.time });
+          reminders.push({ time: a.time, zh: `闹钟提醒：${a.label}` });
+        }
+      });
+      (data.medications || []).forEach(m => {
+        if (m.enabled && m.name && m.time) {
+          items.push({ icon: '💊', text: `服药 · Medication: ${m.name}`, time: m.time });
+          reminders.push({ time: m.time, zh: `服药提醒：该服${m.name}了` });
+        }
+      });
+      if (!items.length) {
+        list.innerHTML = `<p style="color:var(--muted);font-size:.9rem">暂无提醒 · No reminders</p>`;
+        return;
+      }
+      items.sort((a, b) => a.time.localeCompare(b.time));
+      list.innerHTML = items.map(i =>
+        `<div class="reminder-item"><span>${i.icon}</span><span>${i.text}</span><span class="r-time">${i.time}</span></div>`
+      ).join('');
+    } catch(e) {}
+  }
+
+  function checkReminderAlarms() {
+    const now = new Date(), hhmm = now.toTimeString().slice(0, 5);
+    reminders.forEach(r => {
+      const key = r.time + '|' + now.toDateString();
+      if (r.time === hhmm && !firedSet.has(key)) { firedSet.add(key); speak(r.zh); }
+    });
+  }
+
+  // ── 聊天 ──
+  function addBubble(text, role) {
+    const log = document.getElementById('chat-log');
+    const div = document.createElement('div');
+    div.className = `bubble ${role}`;
+    div.textContent = text;
+    log.appendChild(div);
+    log.scrollTop = log.scrollHeight;
+    return div;
+  }
+
+  async function sendMessage(text) {
+    if (!text.trim()) return;
+    addBubble(text, 'user');
+    const thinking = addBubble('思考中…', 'bot thinking');
+    try {
+      const res = await fetch(`${API}/api/chat`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ message: text }),
+      });
+      const data = await res.json();
+      thinking.remove();
+      const reply = data.reply || '抱歉，没有收到回复。';
+      addBubble(reply, 'bot');
+      speak(reply);
+    } catch(e) {
+      thinking.textContent = '网络错误，请稍后再试。';
+      thinking.classList.remove('thinking');
+    }
+  }
+
+  function sendText() {
+    const input = document.getElementById('chat-input');
+    const text = input.value.trim();
+    if (!text) return;
+    input.value = '';
+    sendMessage(text);
+  }
+
+  document.getElementById('chat-input').addEventListener('keydown', e => {
+    if (e.key === 'Enter') sendText();
+  });
+
+  // ── 语音输入（按住说话）──
+  const chatBtn = document.getElementById('chat-btn');
+  const hint    = document.getElementById('chat-hint');
+  let recognition = null;
+
+  if ('webkitSpeechRecognition' in window || 'SpeechRecognition' in window) {
+    const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+    recognition = new SR();
+    recognition.lang = 'zh-CN';
+    recognition.interimResults = false;
+    recognition.onresult = e => {
+      const text = e.results[0][0].transcript;
+      sendMessage(text);
+    };
+    recognition.onend = () => {
+      chatBtn.classList.remove('listening');
+      hint.textContent = '按住说话 · Hold to speak';
+    };
+
+    chatBtn.addEventListener('mousedown',  startListen);
+    chatBtn.addEventListener('touchstart', startListen, { passive: true });
+    chatBtn.addEventListener('mouseup',    stopListen);
+    chatBtn.addEventListener('touchend',   stopListen);
+  } else {
+    hint.textContent = '浏览器不支持语音，请使用文字输入 · Use text input below';
+  }
+
+  function startListen() {
+    window.speechSynthesis.cancel();
+    chatBtn.classList.add('listening');
+    hint.textContent = '正在聆听… · Listening…';
+    recognition.start();
+  }
+  function stopListen() {
+    recognition.stop();
+  }
+
+  fetchStatus();
+  fetchReminders();
+  setInterval(fetchStatus, 15000);
+  setInterval(fetchReminders, 60000);
+  setInterval(checkReminderAlarms, 30000);
+  checkReminderAlarms();
+</script>
+</body>
+</html>

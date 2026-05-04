@@ -1,0 +1,472 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>居家守护 · Family Dashboard</title>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@400;500;700&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg:      #0f1923;
+    --surface: #172130;
+    --card:    #1e2d3d;
+    --border:  #2a3f55;
+    --text:    #e8edf2;
+    --muted:   #6b8099;
+    --accent:  #3b9eff;
+    --green:   #2ecc71;
+    --warn:    #f39c12;
+    --danger:  #e74c3c;
+    --shadow:  0 8px 32px rgba(0,0,0,.4);
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: 'Noto Sans SC', sans-serif; background: var(--bg); color: var(--text); min-height: 100vh; }
+
+  /* 语言切换 */
+  #lang-toggle {
+    position: fixed; top: 16px; right: 20px;
+    background: var(--card); border: 1px solid var(--border);
+    border-radius: 16px; padding: 5px 14px;
+    font-size: .8rem; cursor: pointer; color: var(--muted);
+    z-index: 200; transition: color .2s;
+  }
+  #lang-toggle:hover { color: var(--accent); }
+
+  /* 侧边栏 */
+  .sidebar {
+    position: fixed; left: 0; top: 0; bottom: 0; width: 210px;
+    background: var(--surface); border-right: 1px solid var(--border);
+    display: flex; flex-direction: column; padding: 28px 0; z-index: 10;
+  }
+  .sidebar-logo { padding: 0 22px 28px; border-bottom: 1px solid var(--border); margin-bottom: 12px; }
+  .sidebar-logo h1 { font-size: 1.05rem; font-weight: 700; color: var(--accent); }
+  .sidebar-logo p  { font-size: .72rem; color: var(--muted); margin-top: 3px; }
+  .nav-item {
+    padding: 11px 22px; cursor: pointer; font-size: .9rem; color: var(--muted);
+    display: flex; align-items: center; gap: 9px;
+    border-left: 3px solid transparent; transition: all .2s;
+  }
+  .nav-item:hover { color: var(--text); background: rgba(59,158,255,.06); }
+  .nav-item.active { color: var(--accent); border-left-color: var(--accent); background: rgba(59,158,255,.1); font-weight: 700; }
+
+  /* 主内容 */
+  .main { margin-left: 210px; padding: 36px 44px; max-width: 1080px; }
+  .page { display: none; }
+  .page.active { display: block; }
+  .page-title    { font-size: 1.4rem; font-weight: 700; margin-bottom: 6px; }
+  .page-subtitle { color: var(--muted); font-size: .88rem; margin-bottom: 30px; }
+
+  /* 卡片 */
+  .card { background: var(--card); border: 1px solid var(--border); border-radius: 14px; padding: 24px 28px; margin-bottom: 20px; box-shadow: var(--shadow); }
+  .card-title { font-size: .95rem; font-weight: 700; margin-bottom: 18px; padding-bottom: 10px; border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 7px; }
+
+  /* 监控数值 */
+  .monitor-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 16px; margin-bottom: 20px; }
+  .monitor-stat { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 18px 22px; text-align: center; }
+  .monitor-stat .lbl { font-size: .75rem; color: var(--muted); letter-spacing: .08em; margin-bottom: 7px; }
+  .monitor-stat .val { font-family: 'DM Mono', monospace; font-size: 2.2rem; font-weight: 500; line-height: 1; }
+  .monitor-stat .unit { font-size: .9rem; color: var(--muted); }
+  .monitor-stat.warn .val   { color: var(--warn); }
+  .monitor-stat.danger .val { color: var(--danger); }
+
+  /* 徽章 */
+  .badge { display: inline-flex; align-items: center; gap: 5px; padding: 3px 11px; border-radius: 18px; font-size: .78rem; font-weight: 700; font-family: 'DM Mono', monospace; }
+  .badge.online  { background: rgba(46,204,113,.15); color: var(--green); }
+  .badge.offline { background: rgba(107,128,153,.15); color: var(--muted); }
+  .badge.warn    { background: rgba(243,156,18,.15);  color: var(--warn); }
+  .badge-dot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+  .badge.online .badge-dot { animation: pulse 1.5s infinite; }
+  @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.3} }
+
+  /* 告警行 */
+  .alert-row { display: flex; align-items: center; gap: 14px; padding: 10px 0; border-bottom: 1px solid var(--border); font-size: .88rem; }
+  .alert-row:last-child { border-bottom: none; }
+  .alert-type { padding: 2px 9px; border-radius: 5px; font-size: .75rem; font-weight: 700; font-family: 'DM Mono', monospace; white-space: nowrap; }
+  .alert-type.HOT           { background: rgba(231,76,60,.2);   color: #e74c3c; }
+  .alert-type.COLD          { background: rgba(52,152,219,.2);  color: #3498db; }
+  .alert-type.HUMID         { background: rgba(155,89,182,.2);  color: #9b59b6; }
+  .alert-type.CRITICAL_HOT  { background: rgba(231,76,60,.35);  color: #ff4444; }
+  .alert-type.NORMAL        { background: rgba(46,204,113,.15); color: var(--green); }
+  .alert-time { font-family: 'DM Mono', monospace; font-size: .78rem; color: var(--muted); margin-left: auto; white-space: nowrap; }
+
+  /* 表单 */
+  .form-group  { margin-bottom: 18px; }
+  .form-label  { display: block; font-size: .82rem; color: var(--muted); margin-bottom: 7px; }
+  .form-input  { width: 100%; background: var(--surface); border: 1px solid var(--border); border-radius: 7px; padding: 9px 12px; font-size: .9rem; font-family: 'Noto Sans SC', sans-serif; color: var(--text); outline: none; transition: border-color .2s; }
+  .form-input:focus { border-color: var(--accent); }
+  .form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+
+  /* 条目行 */
+  .entry-row { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; background: var(--surface); border: 1px solid var(--border); border-radius: 9px; padding: 10px 14px; }
+  .entry-row input[type="text"],
+  .entry-row input[type="time"] { background: transparent; border: none; border-bottom: 1px solid var(--border); color: var(--text); font-size: .88rem; font-family: 'Noto Sans SC', sans-serif; outline: none; padding: 3px 5px; flex: 1; }
+  .entry-row input[type="checkbox"] { width: 16px; height: 16px; accent-color: var(--accent); }
+  .remove-btn { background: none; border: none; color: var(--danger); cursor: pointer; font-size: 1.1rem; opacity: .6; transition: opacity .2s; padding: 0 3px; }
+  .remove-btn:hover { opacity: 1; }
+
+  /* 按钮 */
+  .btn { padding: 9px 22px; border-radius: 7px; border: none; font-size: .88rem; font-family: 'Noto Sans SC', sans-serif; font-weight: 700; cursor: pointer; transition: opacity .2s, transform .1s; }
+  .btn:active { transform: scale(.97); }
+  .btn-primary { background: var(--accent); color: #fff; }
+  .btn-primary:hover { opacity: .88; }
+  .btn-outline { background: transparent; border: 1px solid var(--border); color: var(--muted); }
+  .btn-outline:hover { border-color: var(--accent); color: var(--accent); }
+  .btn-row { display: flex; gap: 10px; margin-top: 6px; flex-wrap: wrap; }
+
+  /* 前端对接说明框 */
+  .code-box { background: #0a1520; border: 1px solid var(--border); border-radius: 10px; padding: 16px 20px; font-family: 'DM Mono', monospace; font-size: .82rem; color: #7dd3fc; line-height: 1.7; margin-top: 12px; overflow-x: auto; }
+  .code-box .comment { color: var(--muted); }
+
+  /* 保存提示 */
+  #save-toast { position: fixed; bottom: 28px; right: 28px; background: var(--green); color: #fff; padding: 11px 22px; border-radius: 9px; font-weight: 700; font-size: .9rem; box-shadow: var(--shadow); display: none; animation: slideUp .3s ease; }
+  @keyframes slideUp { from{opacity:0;transform:translateY(14px)} to{opacity:1;transform:translateY(0)} }
+</style>
+</head>
+<body>
+
+<button id="lang-toggle" onclick="toggleLang()">EN</button>
+
+<nav class="sidebar">
+  <div class="sidebar-logo">
+    <h1 data-zh="居家守护" data-en="Home Guardian">居家守护</h1>
+    <p  data-zh="子女管理端" data-en="Family Dashboard">子女管理端</p>
+  </div>
+  <div class="nav-item active" onclick="showPage('monitor', this)">
+    <span>📊</span><span data-zh="实时监控" data-en="Live Monitor">实时监控</span>
+  </div>
+  <div class="nav-item" onclick="showPage('profile', this)">
+    <span>👤</span><span data-zh="老人信息" data-en="Elder Profile">老人信息</span>
+  </div>
+  <div class="nav-item" onclick="showPage('medication', this)">
+    <span>💊</span><span data-zh="用药管理" data-en="Medications">用药管理</span>
+  </div>
+  <div class="nav-item" onclick="showPage('alarms', this)">
+    <span>⏰</span><span data-zh="闹钟设置" data-en="Alarms">闹钟设置</span>
+  </div>
+</nav>
+
+<div class="main">
+
+  <!-- 实时监控 -->
+  <div class="page active" id="page-monitor">
+    <div class="page-title"  data-zh="实时监控"           data-en="Live Monitor">实时监控</div>
+    <div class="page-subtitle" data-zh="查看老人家中的环境状况与历史告警" data-en="View home environment and alert history">查看老人家中的环境状况与历史告警</div>
+
+    <div class="monitor-grid">
+      <div class="monitor-stat" id="stat-temp">
+        <div class="lbl" data-zh="室内温度" data-en="Temperature">室内温度</div>
+        <div class="val" id="m-temp">--<span class="unit"> °C</span></div>
+      </div>
+      <div class="monitor-stat" id="stat-humi">
+        <div class="lbl" data-zh="室内湿度" data-en="Humidity">室内湿度</div>
+        <div class="val" id="m-humi">--<span class="unit"> %</span></div>
+      </div>
+      <div class="monitor-stat">
+        <div class="lbl" data-zh="系统状态" data-en="System Status">系统状态</div>
+        <div class="val" style="font-size:1rem;padding-top:6px">
+          <span class="badge offline" id="m-status-badge"><span class="badge-dot"></span><span id="m-status-text" data-zh="离线" data-en="Offline">离线</span></span>
+        </div>
+      </div>
+      <div class="monitor-stat">
+        <div class="lbl" data-zh="最后更新" data-en="Last Update">最后更新</div>
+        <div class="val" id="m-time" style="font-size:.88rem;padding-top:5px;color:var(--muted)">--</div>
+      </div>
+    </div>
+
+    <div class="card" id="ai-card" style="display:none">
+      <div class="card-title">🤖 <span data-zh="AI 环境提醒" data-en="AI Alert Message">AI 环境提醒</span></div>
+      <div id="ai-msg" style="font-size:1rem;line-height:1.8"></div>
+      <div style="margin-top:14px">
+        <button class="btn btn-outline" onclick="speakAiMsg()">
+          <span data-zh="🔊 语音播报" data-en="🔊 Read Aloud">🔊 语音播报</span>
+        </button>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-title">📋 <span data-zh="最近告警记录" data-en="Recent Alerts">最近告警记录</span></div>
+      <div id="alert-list"><p style="color:var(--muted);font-size:.88rem" data-zh="加载中…" data-en="Loading…">加载中…</p></div>
+    </div>
+  </div>
+
+  <!-- 前端对接 -->
+  <!-- 老人信息 -->
+  <div class="page" id="page-profile">
+    <div class="page-title"    data-zh="老人基本信息"                         data-en="Elder Profile">老人基本信息</div>
+    <div class="page-subtitle" data-zh="填写老人的基本资料，AI 将据此调整提醒内容" data-en="Basic info used by AI to personalise alerts">填写老人的基本资料，AI 将据此调整提醒内容</div>
+    <div class="card">
+      <div class="form-row">
+        <div class="form-group">
+          <label class="form-label" data-zh="老人姓名" data-en="Name">老人姓名</label>
+          <input class="form-input" type="text" id="p-name" placeholder="例：张奶奶">
+        </div>
+        <div class="form-group">
+          <label class="form-label" data-zh="年龄" data-en="Age">年龄</label>
+          <input class="form-input" type="number" id="p-age" placeholder="75" min="60" max="120">
+        </div>
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label class="form-label" data-zh="健康备注" data-en="Health Notes">健康备注</label>
+          <input class="form-input" type="text" id="p-health" placeholder="例：高血压、糖尿病">
+        </div>
+        <div class="form-group">
+          <label class="form-label" data-zh="紧急联系电话" data-en="Emergency Contact">紧急联系电话</label>
+          <input class="form-input" type="text" id="p-phone" placeholder="138xxxxxxxx">
+        </div>
+      </div>
+      <div class="btn-row">
+        <button class="btn btn-primary" onclick="saveAll()">
+          <span data-zh="保存信息" data-en="Save">保存信息</span>
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 用药管理 -->
+  <div class="page" id="page-medication">
+    <div class="page-title"    data-zh="用药管理"                     data-en="Medications">用药管理</div>
+    <div class="page-subtitle" data-zh="设置每日用药计划，老人端页面将显示提醒" data-en="Daily medication schedule shown on the elder screen">设置每日用药计划，老人端页面将显示提醒</div>
+    <div class="card">
+      <div class="card-title">💊 <span data-zh="用药列表" data-en="Medication List">用药列表</span></div>
+      <div id="med-list"></div>
+      <div class="btn-row">
+        <button class="btn btn-outline" onclick="addMed()">
+          <span data-zh="＋ 添加用药" data-en="＋ Add Medication">＋ 添加用药</span>
+        </button>
+        <button class="btn btn-primary" onclick="saveAll()">
+          <span data-zh="保存设置" data-en="Save">保存设置</span>
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 闹钟设置 -->
+  <div class="page" id="page-alarms">
+    <div class="page-title"    data-zh="闹钟设置"                   data-en="Alarms">闹钟设置</div>
+    <div class="page-subtitle" data-zh="设置每日提醒，老人端将显示今日日程" data-en="Daily reminders shown on the elder screen">设置每日提醒，老人端将显示今日日程</div>
+    <div class="card">
+      <div class="card-title">⏰ <span data-zh="闹钟列表" data-en="Alarm List">闹钟列表</span></div>
+      <div id="alarm-list"></div>
+      <div class="btn-row">
+        <button class="btn btn-outline" onclick="addAlarm()">
+          <span data-zh="＋ 添加闹钟" data-en="＋ Add Alarm">＋ 添加闹钟</span>
+        </button>
+        <button class="btn btn-primary" onclick="saveAll()">
+          <span data-zh="保存设置" data-en="Save">保存设置</span>
+        </button>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<div id="save-toast" data-zh="✓ 保存成功" data-en="✓ Saved">✓ 保存成功</div>
+
+<script>
+  // ── 修改这里为你的后端地址 ──────────────────────────────────
+  let API = 'http://localhost:8000';
+  // ──────────────────────────────────────────────────────────
+
+  let lang = 'zh';
+  let settings = { profile: {}, medications: [], alarms: [] };
+
+  // 语言切换
+  function toggleLang() {
+    lang = lang === 'zh' ? 'en' : 'zh';
+    document.getElementById('lang-toggle').textContent = lang === 'zh' ? 'EN' : '中文';
+    document.querySelectorAll('[data-zh]').forEach(el => {
+      if (el.tagName === 'INPUT') return;
+      el.textContent = lang === 'zh' ? el.dataset.zh : el.dataset.en;
+    });
+    renderMeds();
+    renderAlarms();
+    fetchAlerts();
+  }
+
+  // 页面切换
+  function showPage(id, el) {
+    document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+    document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
+    document.getElementById('page-' + id).classList.add('active');
+    el.classList.add('active');
+  }
+
+  // 告警标签翻译
+  function speakAiMsg() {
+    const el = document.getElementById('ai-msg');
+    const text = lang === 'zh' ? (el.dataset.zh || el.textContent) : (el.dataset.en || el.textContent);
+    if (!text || !window.speechSynthesis) return;
+    window.speechSynthesis.cancel();
+    const u = new SpeechSynthesisUtterance(text);
+    u.lang = lang === 'zh' ? 'zh-CN' : 'en-US';
+    u.rate = 0.9;
+    window.speechSynthesis.speak(u);
+  }
+  const typeMap = {
+    '[NORMAL]':       { zh: '正常',    en: 'Normal',       cls: 'NORMAL' },
+    '[HOT]':          { zh: '高温',    en: 'Hot',          cls: 'HOT' },
+    '[COLD]':         { zh: '低温',    en: 'Cold',         cls: 'COLD' },
+    '[HUMID]':        { zh: '高湿',    en: 'Humid',        cls: 'HUMID' },
+    '[CRITICAL_HOT]': { zh: '极端高温', en: 'Critical Hot', cls: 'CRITICAL_HOT' },
+  };
+
+  // 监控数据
+  async function fetchMonitor() {
+    try {
+      const data = await (await fetch(`${API}/api/status`)).json();
+      const t    = data.temp !== null ? parseFloat(data.temp) : null;
+      const h    = data.humi !== null ? parseFloat(data.humi) : null;
+
+      document.getElementById('m-temp').innerHTML = t !== null ? `${t.toFixed(1)}<span class="unit"> °C</span>` : '--';
+      document.getElementById('m-humi').innerHTML = h !== null ? `${h.toFixed(1)}<span class="unit"> %</span>` : '--';
+      document.getElementById('m-time').textContent = data.timestamp || '--';
+
+      if (t !== null) {
+        const s = document.getElementById('stat-temp');
+        s.className = t >= 38 ? 'monitor-stat danger' : (t >= 30 || t <= 16 ? 'monitor-stat warn' : 'monitor-stat');
+      }
+
+      const badge   = document.getElementById('m-status-badge');
+      const stLabel = document.getElementById('m-status-text');
+      if (data.status === 'ONLINE') {
+        badge.className = 'badge online';
+        stLabel.dataset.zh = '在线'; stLabel.dataset.en = 'Online';
+      } else if (data.status === 'DEGRADED') {
+        badge.className = 'badge warn';
+        stLabel.dataset.zh = '信号弱'; stLabel.dataset.en = 'Degraded';
+      } else {
+        badge.className = 'badge offline';
+        stLabel.dataset.zh = '离线'; stLabel.dataset.en = 'Offline';
+      }
+      stLabel.textContent = lang === 'zh' ? stLabel.dataset.zh : stLabel.dataset.en;
+
+      const aiCard = document.getElementById('ai-card');
+      const msgZh = data.message    || '';
+      const msgEn = data.message_en || '';
+      if (msgZh.trim() || msgEn.trim()) {
+        aiCard.style.display = 'block';
+        const el = document.getElementById('ai-msg');
+        el.dataset.zh = msgZh;
+        el.dataset.en = msgEn;
+        el.textContent = lang === 'zh' ? msgZh : msgEn;
+      } else {
+        aiCard.style.display = 'none';
+      }
+    } catch(e) {}
+  }
+
+  async function fetchAlerts() {
+    try {
+      const data = await (await fetch(`${API}/api/logs?n=20`)).json();
+      const list = document.getElementById('alert-list');
+      if (!data || !data.length) {
+        list.innerHTML = `<p style="color:var(--muted);font-size:.88rem">${lang==='zh'?'暂无记录':'No records'}</p>`;
+        return;
+      }
+      list.innerHTML = data.map(row => {
+        const t = typeMap[row.Alert_Type] || { zh: row.Alert_Type, en: row.Alert_Type, cls: 'NORMAL' };
+        return `<div class="alert-row">
+          <span class="alert-type ${t.cls}">${lang==='zh'?t.zh:t.en}</span>
+          <span style="color:var(--muted);font-size:.82rem">${row.Room_Temp}°C · ${row.Room_Humi}%</span>
+          <span class="alert-time">${row.Timestamp}</span>
+        </div>`;
+      }).join('');
+    } catch(e) {}
+  }
+
+  // 设置
+  async function loadSettings() {
+    try {
+      const data = await (await fetch(`${API}/api/settings`)).json();
+      settings = { profile: data.profile||{}, medications: data.medications||[], alarms: data.alarms||[] };
+      const p = settings.profile;
+      document.getElementById('p-name').value   = p.name   || '';
+      document.getElementById('p-age').value    = p.age    || '';
+      document.getElementById('p-health').value = p.health || '';
+      document.getElementById('p-phone').value  = p.phone  || '';
+      renderMeds();
+      renderAlarms();
+    } catch(e) {}
+  }
+
+  async function saveAll() {
+    settings.profile = {
+      name:   document.getElementById('p-name').value.trim(),
+      age:    document.getElementById('p-age').value.trim(),
+      health: document.getElementById('p-health').value.trim(),
+      phone:  document.getElementById('p-phone').value.trim(),
+    };
+    settings.medications = [];
+    document.querySelectorAll('.med-entry').forEach(r => {
+      settings.medications.push({
+        enabled: r.querySelector('.med-enabled').checked,
+        name:    r.querySelector('.med-name').value.trim(),
+        time:    r.querySelector('.med-time').value,
+        note:    r.querySelector('.med-note').value.trim(),
+      });
+    });
+    settings.alarms = [];
+    document.querySelectorAll('.alarm-entry').forEach(r => {
+      settings.alarms.push({
+        time:  r.querySelector('.alarm-time').value,
+        label: r.querySelector('.alarm-label').value.trim(),
+      });
+    });
+    try {
+      await fetch(`${API}/api/settings`, {
+        method: 'POST',
+        headers: {'Content-Type':'application/json'},
+        body: JSON.stringify(settings),
+      });
+      const t = document.getElementById('save-toast');
+      t.textContent = lang === 'zh' ? '✓ 保存成功' : '✓ Saved';
+      t.style.display = 'block';
+      setTimeout(() => { t.style.display = 'none'; }, 2500);
+    } catch(e) {
+      alert(lang === 'zh' ? '保存失败，请检查后端是否在线' : 'Save failed — check if backend is running');
+    }
+  }
+
+  function renderMeds() {
+    const ph_name = lang==='zh'?'药品名称':'Drug name';
+    const ph_note = lang==='zh'?'备注（可选）':'Notes (optional)';
+    document.getElementById('med-list').innerHTML =
+      settings.medications.map((m,i) => `
+        <div class="entry-row med-entry">
+          <input type="checkbox" class="med-enabled" ${m.enabled?'checked':''}>
+          <input type="text"  class="med-name" value="${m.name||''}" placeholder="${ph_name}" style="max-width:150px">
+          <input type="time"  class="med-time" value="${m.time||''}">
+          <input type="text"  class="med-note" value="${m.note||''}" placeholder="${ph_note}">
+          <button class="remove-btn" onclick="removeMed(${i})">✕</button>
+        </div>`
+      ).join('') || `<p style="color:var(--muted);font-size:.88rem;margin-bottom:10px">${lang==='zh'?'暂无用药记录':'No medications'}</p>`;
+  }
+
+  function addMed()        { settings.medications.push({enabled:true,name:'',time:'08:00',note:''}); renderMeds(); }
+  function removeMed(i)    { settings.medications.splice(i,1); renderMeds(); }
+
+  function renderAlarms() {
+    const ph = lang==='zh'?'提醒内容（例：早餐时间）':'Reminder label (e.g. Breakfast)';
+    document.getElementById('alarm-list').innerHTML =
+      settings.alarms.map((a,i) => `
+        <div class="entry-row alarm-entry">
+          <input type="time" class="alarm-time"  value="${a.time||''}">
+          <input type="text" class="alarm-label" value="${a.label||''}" placeholder="${ph}">
+          <button class="remove-btn" onclick="removeAlarm(${i})">✕</button>
+        </div>`
+      ).join('') || `<p style="color:var(--muted);font-size:.88rem;margin-bottom:10px">${lang==='zh'?'暂无闹钟':'No alarms'}</p>`;
+  }
+
+  function addAlarm()      { settings.alarms.push({time:'08:00',label:''}); renderAlarms(); }
+  function removeAlarm(i)  { settings.alarms.splice(i,1); renderAlarms(); }
+
+  // 初始化
+  loadSettings();
+  fetchMonitor();
+  fetchAlerts();
+  setInterval(fetchMonitor, 15000);
+  setInterval(fetchAlerts,  30000);
+</script>
+</body>
+</html>
