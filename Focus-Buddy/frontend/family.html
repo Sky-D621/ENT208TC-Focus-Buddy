@@ -270,6 +270,7 @@
 
   let lang = 'zh';
   let settings = { profile: {}, medications: [], alarms: [] };
+  let spokenMessageKey = '';
 
   // 语言切换
   function toggleLang() {
@@ -342,14 +343,19 @@
       stLabel.textContent = lang === 'zh' ? stLabel.dataset.zh : stLabel.dataset.en;
 
       const aiCard = document.getElementById('ai-card');
-      const msgZh = data.message    || '';
-      const msgEn = data.message_en || '';
+      const msgZh = data.sos_active ? (data.sos_message || '') : (data.message || '');
+      const msgEn = data.sos_active ? (data.sos_message_en || '') : (data.message_en || '');
       if (msgZh.trim() || msgEn.trim()) {
         aiCard.style.display = 'block';
         const el = document.getElementById('ai-msg');
         el.dataset.zh = msgZh;
         el.dataset.en = msgEn;
         el.textContent = lang === 'zh' ? msgZh : msgEn;
+        const messageKey = `${data.sos_timestamp || ''}|${msgZh}|${msgEn}`;
+        if (data.sos_active && spokenMessageKey !== messageKey) {
+          spokenMessageKey = messageKey;
+          speakAiMsg();
+        }
       } else {
         aiCard.style.display = 'none';
       }

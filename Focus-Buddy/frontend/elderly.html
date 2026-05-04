@@ -324,11 +324,12 @@
         const lv = getLevel(t, h);
         document.getElementById('temp-card').className = `sensor-card ${lv === 'normal' ? '' : lv}`;
         document.getElementById('humi-card').className = `sensor-card ${lv === 'normal' ? '' : lv}`;
-        const msgZh = data.message || '', msgEn = data.message_en || '';
+        const msgZh = data.sos_active ? (data.sos_message || '') : (data.message || '');
+        const msgEn = data.sos_active ? (data.sos_message_en || '') : (data.message_en || '');
         const banner = document.getElementById('alert-banner');
         if (msgZh.trim() || msgEn.trim()) {
           banner.textContent = msgZh + (msgEn ? `  ·  ${msgEn}` : '');
-          banner.className = `show lvl-${lv}`;
+          banner.className = data.sos_active ? 'show lvl-danger' : `show lvl-${lv}`;
           const key = msgZh || msgEn;
           if (!spokenSet.has(key)) { spokenSet.add(key); speak(msgZh || msgEn); }
           lastMessage = msgZh || msgEn;

@@ -34,6 +34,7 @@ last_alarm_at = {}
 BASE_DIR = Path(__file__).resolve().parent
 HEARTBEAT_FILE = BASE_DIR / "sensor_monitor_heartbeat.txt"
 SENSOR_DEBUG_FILE = BASE_DIR / "sensor_monitor_debug.json"
+SOS_EVENT_FILE = BASE_DIR / "sos_event.json"
 AUDIO_FILES = {
     "[CRITICAL_HOT]": BASE_DIR / "audio" / "critical_hot_check_now.mp3",
     "[HOT]": BASE_DIR / "audio" / "hot_drink_water.mp3",
@@ -62,6 +63,32 @@ def write_sensor_debug(status: str, detail: str = "", raw_line: str = "") -> Non
         SENSOR_DEBUG_FILE.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
     except OSError:
         pass
+
+
+def is_sos_line(raw_line: str) -> bool:
+    """Return True when the serial line is an elder call/SOS event."""
+    normalized = raw_line.strip().upper()
+    return normalized in {"SOS", "CALL", "BUTTON:CALL", "EVENT:CALL", "EVENT:SOS"}
+
+
+def handle_sos_event() -> None:
+    """Persist an SOS event so the frontend can display and speak it."""
+    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    payload = {
+        "timestamp": timestamp,
+        "event_type": "SOS",
+        "message": "老人正在呼叫，请尽快查看。",
+        "message_en": "The elder is calling for help. Please check immediately.",
+    }
+
+    try:
+        SOS_EVENT_FILE.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+    except OSError as exc:
+        print(f"Failed to write SOS event: {exc}")
+
+    log_sensor_alert(timestamp, "", "", "[SOS]")
+    write_sensor_debug("SOS_EVENT", "SOS received from M5Stack")
+    print(f"SOS event handled at {timestamp}")
 
 
 def parse_sensor_line(raw_line: str) -> tuple[float, float] | None:
@@ -341,6 +368,11 @@ def monitor_serial_forever() -> None:
                     raw_line = raw_bytes.decode("utf-8", errors="ignore").strip()
                     print(f"Serial line: {raw_line!r}")
                     write_sensor_debug("RAW_LINE", raw_line=raw_line)
+
+                    if is_sos_line(raw_line):
+                        handle_sos_event()
+                        continue
+
                     parsed = parse_sensor_line(raw_line)
 
                     if parsed is None:
