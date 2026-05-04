@@ -14,3 +14,5 @@ Focus-Buddy/focus_data.csv
 Focus-Buddy/sensor_alerts.csv
 Focus-Buddy/elderly_health_logs.csv
 Focus-Buddy/sensor_monitor_heartbeat.txt
+Focus-Buddy/sensor_monitor_debug.json
+Focus-Buddy/settings.json
